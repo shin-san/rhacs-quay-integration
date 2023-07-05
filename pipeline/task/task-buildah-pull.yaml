@@ -1,0 +1,85 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: buildah-pull
+  labels:
+    app.kubernetes.io/version: '0.1'
+spec:
+  description: >-
+    Task for pulling images using Buildah
+  params:
+    - description: Reference of the image buildah will produce.
+      name: IMAGE
+      type: string
+    - description: Version of the image
+      name: VERSION
+      type: string
+    - default: >-
+        registry.redhat.io/rhel8/buildah@sha256:ac0b8714cc260c94435cab46fe41b3de0ccbc3d93e38c395fa9d52ac49e521fe
+      description: The location of the buildah builder image.
+      name: BUILDER_IMAGE
+      type: string
+    - default: vfs
+      description: Set buildah storage driver
+      name: STORAGE_DRIVER
+      type: string
+    - default: 'true'
+      description: >-
+        Verify the TLS on the registry endpoint (for push/pull to a non-TLS
+        registry)
+      name: TLSVERIFY
+      type: string
+    - default: oci
+      description: 'The format of the built container, oci or docker'
+      name: FORMAT
+      type: string
+  steps:
+    - image: $(params.BUILDER_IMAGE)
+      name: build-and-push
+      resources: {}
+      env:
+        - name: GNUPGHOME
+          value: /root/.gnupg
+      script: |
+        #!/bin/bash
+
+        set -ex
+
+        if [[ "$(workspaces.dockerconfig.bound)" == "true" ]]; then
+
+          # if config.json exists at workspace root, we use that
+          if test -f "$(workspaces.dockerconfig.path)/config.json"; then
+            export DOCKER_CONFIG="$(workspaces.dockerconfig.path)"
+
+          # else we look for .dockerconfigjson at the root
+          elif test -f "$(workspaces.dockerconfig.path)/.dockerconfigjson"; then
+            cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" "$HOME/.docker/config.json"
+            export DOCKER_CONFIG="$HOME/.docker"
+
+          # need to error out if neither files are present
+          else
+            echo "neither 'config.json' nor '.dockerconfigjson' found at workspace root"
+            exit 1
+          fi
+        fi
+
+        echo "pulling image..."
+
+        buildah --storage-driver=$(params.STORAGE_DRIVER) \
+          --tls-verify=$(params.TLSVERIFY) pull $(params.IMAGE):$(params.VERSION)
+
+      securityContext:
+        capabilities:
+          add:
+            - SETFCAP
+      volumeMounts:
+        - mountPath: /var/lib/containers
+          name: varlibcontainers
+      workingDir: $(workspaces.source.path)
+  volumes:
+    - emptyDir: {}
+      name: varlibcontainers
+  workspaces:
+    - name: source
+    - name: dockerconfig
+      optional: true

@@ -1,0 +1,22 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: image-validation-pipeline-
+  labels:
+    pipeline: image-validation-pipeline
+spec:
+  params:
+    - name: IMAGE
+      value: quay.io/naythanc/yet-another-hello-world
+    - name: IMAGE_VERSION
+      value: latest
+  pipelineRef:
+    name: image-validation-pipeline
+  serviceAccountName: pipeline
+  workspaces:
+    - name: shared-workspace
+      persistentVolumeClaim:
+        claimName: image-validation-storage
+    - name: dockerconfig
+      secret:
+        secretName: quay-pull-secret

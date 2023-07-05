@@ -1,0 +1,76 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: image-validation-pipeline
+spec:
+
+  workspaces:
+    - name: shared-workspace
+    - name: dockerconfig
+
+  params:
+    - name: IMAGE
+      type: string
+      description: image to verify
+    - name: IMAGE_VERSION
+      type: string
+      description: image version to use 
+
+  tasks:
+    # pull image
+    - name: pull-image
+      taskRef:
+        name: buildah-pull
+        kind: Task
+      params:
+      - name: IMAGE
+        value: "$(params.IMAGE)"
+      - name: VERSION
+        value: "$(params.IMAGE_VERSION)"
+      - name: TLSVERIFY
+        value: "false"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: dockerconfig
+          workspace: dockerconfig
+
+    # scan image for vulns using RHACS
+    - name: scan-image
+      taskRef:
+        name: rhacs-image-scan
+        kind: Task
+      params:
+      - name: image
+        value: "$(params.IMAGE):$(params.IMAGE_VERSION)"
+      - name: insecure-skip-tls-verify
+        value: "true" # stackrox to OCP image registry x509 fail...
+      - name: rox_api_token
+        value: rox-secrets
+      - name: rox_central_endpoint
+        value: rox-secrets
+      runAfter:
+      - pull-image
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # validate image against RHACS policies
+    - name: police-image
+      taskRef:
+        name: rhacs-image-check
+        kind: Task
+      params:
+      - name: image
+        value: "$(params.IMAGE):$(params.IMAGE_VERSION)"
+      - name: insecure-skip-tls-verify
+        value: "true"
+      - name: rox_api_token
+        value: rox-secrets
+      - name: rox_central_endpoint
+        value: rox-secrets
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      runAfter:
+      - scan-image
